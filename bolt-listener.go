@@ -117,7 +117,7 @@ func run() error {
 		}
 
 		status, err := getStatus(v)
-		if err != nil && status != "" {
+		if err == nil && status != "" {
 			err = dock.handleStatus(status)
 		}
 		if err != nil {
