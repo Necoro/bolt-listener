@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/Necoro/feed2imap-go/pkg/log"
 	"github.com/adrg/xdg"
@@ -48,23 +49,26 @@ type dock struct {
 type docks map[dbus.ObjectPath]dock
 
 func execScript(script string) error {
+	log.Debugf("Executing '%s'", script)
+
 	cmd := exec.Command(script)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stdout
+	if log.IsDebug() {
+		cmd.Stdout = os.Stdout
+	}
+
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
-func (d *dock) authorized() error {
-	log.Debug("Authorizing ", d.name)
-	if err := execScript(d.authorize); err != nil {
-		return fmt.Errorf("authorizing %s: %w", d.name, err)
-	}
-	return nil
-}
 
-func (d *dock) disconnected() error {
-	log.Debug("Disconnecting ", d.name)
-	if err := execScript(d.disconnect); err != nil {
-		return fmt.Errorf("disconnecting %s: %w", d.name, err)
+func (d *dock) handle(script, descr string) error {
+	if script == "" {
+		log.Debugf("Ignoring %s for %s", descr, d.name)
+		return nil
+	}
+
+	log.Debugf("%s for %s", strings.Title(descr), d.name)
+	if err := execScript(script); err != nil {
+		return fmt.Errorf("%s for %s: %w", descr, d.name, err)
 	}
 	return nil
 }
@@ -72,9 +76,9 @@ func (d *dock) disconnected() error {
 func (d *dock) handleStatus(status string) error {
 	switch status {
 	case "authorized":
-		return d.authorized()
+		return d.handle(d.authorize, "authorize")
 	case "disconnected":
-		return d.disconnected()
+		return d.handle(d.disconnect, "disconnect")
 	default:
 		return nil
 	}
@@ -86,6 +90,8 @@ func loadConfig(configfile string) (cfg *config, err error) {
 			return nil, fmt.Errorf("loading config: %w", err)
 		}
 	}
+
+	log.Debug("Loading config from ", configfile)
 
 	tree, err := toml.LoadFile(configfile)
 	if err != nil {
@@ -100,14 +106,20 @@ func loadConfig(configfile string) (cfg *config, err error) {
 }
 
 func dbusConnect(busName string) (*dbus.Conn, error) {
-	if busName == "session" {
+	log.Debugf("Connecting to the %s bus", busName)
+
+	switch busName {
+	case "session":
 		return dbus.SessionBus()
-	} else {
+	case "system":
 		return dbus.SystemBus()
+	default:
+		return nil, fmt.Errorf("unknown bus '%s'", busName)
 	}
 }
 
 func addSignal(conn *dbus.Conn, path dbus.ObjectPath) error {
+	log.Debug("Watching for signals of ", path)
 	return conn.AddMatchSignal(
 		dbus.WithMatchObjectPath(path),
 		dbus.WithMatchInterface(propertiesInterface),
@@ -119,6 +131,10 @@ func run() error {
 	cfgOverride := flag.String("f", "", "configuration file")
 	debug := flag.Bool("d", false, "enable debug output")
 	flag.Parse()
+
+	if *debug { // need this for loading the config
+		log.SetDebug()
+	}
 
 	config, err := loadConfig(*cfgOverride)
 	if err != nil {
@@ -153,10 +169,11 @@ func run() error {
 	c := make(chan *dbus.Signal, 10)
 	conn.Signal(c)
 	for v := range c {
+		log.Debug("Received: ", v)
+
 		dock, ok := docks[v.Path]
 		if !ok {
-			log.Print("Ignoring unexpected path ", v.Path)
-			continue
+			return fmt.Errorf("unexpected path %s", v.Path)
 		}
 
 		var interfaceName string
