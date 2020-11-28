@@ -5,74 +5,179 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/Necoro/feed2imap-go/pkg/log"
+	"github.com/adrg/xdg"
 	"github.com/godbus/dbus/v5"
+	"github.com/pelletier/go-toml"
 )
 
-// UUID of the dock as given by `boltctl --list`
-const dock = "deadbeef_uuid"
+const configFileName = "bolt-listener.toml"
 
-// Scripts to run
-const authorizeScript = "connect_dock.sh"
-const disconnectScript = "disconnect_dock.sh"
+// Bolt DBus
+const (
+	boltSenderName      = "org.freedesktop.bolt"
+	boltDeviceInterface = "org.freedesktop.bolt1.Device"
+	boltDevicePath      = "/org/freedesktop/bolt/devices/"
+	propertiesInterface = "org.freedesktop.DBus.Properties"
+)
 
-const boltDevice = "org.freedesktop.bolt1.Device"
+type dockConfig struct {
+	Uuid       string
+	Authorize  string
+	Disconnect string
+}
 
-func run(script string) {
+func (d dockConfig) objectPath() dbus.ObjectPath {
+	return dbus.ObjectPath(boltDevicePath + d.Uuid)
+}
+
+type config struct {
+	Debug bool   `default:"false"`
+	Bus   string `default:"system"`
+	Docks map[string]dockConfig
+}
+
+type dock struct {
+	uuid       string
+	authorize  string
+	disconnect string
+	name       string
+}
+
+type docks map[dbus.ObjectPath]dock
+
+func execScript(script string) error {
 	cmd := exec.Command(script)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stdout
-	if err := cmd.Run(); err != nil {
-		panic(err)
+	return cmd.Run()
+}
+func (d *dock) authorized() error {
+	log.Debug("Authorizing ", d.name)
+	if err := execScript(d.authorize); err != nil {
+		return fmt.Errorf("authorizing %s: %w", d.name, err)
+	}
+	return nil
+}
+
+func (d *dock) disconnected() error {
+	log.Debug("Disconnecting ", d.name)
+	if err := execScript(d.disconnect); err != nil {
+		return fmt.Errorf("disconnecting %s: %w", d.name, err)
+	}
+	return nil
+}
+
+func (d *dock) handleStatus(status string) error {
+	switch status {
+	case "authorized":
+		return d.authorized()
+	case "disconnected":
+		return d.disconnected()
+	default:
+		return nil
 	}
 }
 
-func authorized() {
-	fmt.Println("Authorizing")
-	run(authorizeScript)
-}
-
-func disconnected() {
-	fmt.Println("Disconnecting")
-	run(disconnectScript)
-}
-
-func main() {
-	conn, err := dbus.SystemBus()
+func loadConfig() (*config, error) {
+	configfile, err := xdg.ConfigFile(configFileName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to connect to system bus:", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+
+	config := config{}
+	tree, err := toml.LoadFile(configfile)
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	if err = tree.Unmarshal(&config); err != nil {
+		return nil, fmt.Errorf("unmarshalling config: %w", err)
+	}
+
+	return &config, nil
+}
+
+func dbusConnect(busName string) (*dbus.Conn, error) {
+	if busName == "session" {
+		return dbus.SessionBus()
+	} else {
+		return dbus.SystemBus()
+	}
+}
+
+func addSignal(conn *dbus.Conn, path dbus.ObjectPath) error {
+	return conn.AddMatchSignal(
+		dbus.WithMatchObjectPath(path),
+		dbus.WithMatchInterface(propertiesInterface),
+		dbus.WithMatchSender(boltSenderName),
+	)
+}
+
+func run() error {
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	if config.Debug {
+		log.SetDebug()
+	} else {
+		log.SetVerbose()
+	}
+
+	conn, err := dbusConnect(config.Bus)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s bus: %w", config.Bus, err)
 	}
 	defer conn.Close()
 
-	if err = conn.AddMatchSignal(
-		dbus.WithMatchObjectPath("/org/freedesktop/bolt/devices/"+dock),
-		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
-		dbus.WithMatchSender("org.freedesktop.bolt"),
-	); err != nil {
-		panic(err)
+	docks := make(docks)
+	for name, d := range config.Docks {
+		docks[d.objectPath()] = dock{
+			uuid:       d.Uuid,
+			authorize:  d.Authorize,
+			disconnect: d.Disconnect,
+			name:       name,
+		}
+		if err = addSignal(conn, d.objectPath()); err != nil {
+			return fmt.Errorf("failed to listen to signal for %s: %w", name, err)
+		}
 	}
 
 	c := make(chan *dbus.Signal, 10)
 	conn.Signal(c)
 	for v := range c {
+		dock, ok := docks[v.Path]
+		if !ok {
+			log.Print("Ignoring unexpected path ", v.Path)
+			continue
+		}
+
 		var interfaceName string
 		var changed map[string]interface{}
 		var invalidated []string
-		if err := dbus.Store(v.Body, &interfaceName, &changed, &invalidated); err != nil {
-			panic(fmt.Errorf("Unexpected data: %s; Error: %w", v.Body, err))
+		if err = dbus.Store(v.Body, &interfaceName, &changed, &invalidated); err != nil {
+			return fmt.Errorf("Unexpected data: %s; Error: %w", v.Body, err)
 		}
 
-		if interfaceName != boltDevice {
-			panic(fmt.Errorf("Unexpected Interface: %s", interfaceName))
+		if interfaceName != boltDeviceInterface {
+			return fmt.Errorf("Unexpected Interface: %s", interfaceName)
 		}
 
 		if status, ok := changed["Status"]; ok {
-			switch status.(string) {
-			case "authorized":
-				authorized()
-			case "disconnected":
-				disconnected()
+			if err = dock.handleStatus(status.(string)); err != nil {
+				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
 	}
 }
