@@ -1,0 +1,11 @@
+[Unit]
+Description=Listen for Thunderbolt devices
+After=dbus.socket bolt.service
+Requires=dbus.socket
+
+[Service]
+ExecStart=%h/bin/bolt-listener
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
