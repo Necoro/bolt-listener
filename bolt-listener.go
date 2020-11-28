@@ -23,10 +23,15 @@ const (
 	propertiesInterface = "org.freedesktop.DBus.Properties"
 )
 
+type cmd struct {
+	Exe string `toml:"cmd"`
+	Args []string
+}
+
 type dockConfig struct {
 	Uuid       string
-	Authorize  string
-	Disconnect string
+	Authorize  *cmd
+	Disconnect *cmd
 }
 
 func (d dockConfig) objectPath() dbus.ObjectPath {
@@ -41,17 +46,17 @@ type config struct {
 
 type dock struct {
 	uuid       string
-	authorize  string
-	disconnect string
+	authorize  *cmd
+	disconnect *cmd
 	name       string
 }
 
 type docks map[dbus.ObjectPath]dock
 
-func execScript(script string) error {
-	log.Debugf("Executing '%s'", script)
+func (c *cmd) exec () error {
+	log.Debugf("Executing '%s'", c.Exe)
 
-	cmd := exec.Command(script)
+	cmd := exec.Command(c.Exe, c.Args...)
 	if log.IsDebug() {
 		cmd.Stdout = os.Stdout
 	}
@@ -60,14 +65,14 @@ func execScript(script string) error {
 	return cmd.Run()
 }
 
-func (d *dock) handle(script, descr string) error {
-	if script == "" {
+func (d *dock) handle(script *cmd, descr string) error {
+	if script == nil {
 		log.Debugf("Ignoring %s for %s", descr, d.name)
 		return nil
 	}
 
 	log.Debugf("%s for %s", strings.Title(descr), d.name)
-	if err := execScript(script); err != nil {
+	if err := script.exec(); err != nil {
 		return fmt.Errorf("%s for %s: %w", descr, d.name, err)
 	}
 	return nil
