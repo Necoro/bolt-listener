@@ -118,13 +118,21 @@ func dbusConnect(busName string) (*dbus.Conn, error) {
 	}
 }
 
+var testMode = false
+
 func addSignal(conn *dbus.Conn, path dbus.ObjectPath) error {
 	log.Debug("Watching for signals of ", path)
-	return conn.AddMatchSignal(
+
+	options := []dbus.MatchOption{
 		dbus.WithMatchObjectPath(path),
 		dbus.WithMatchInterface(propertiesInterface),
-		dbus.WithMatchSender(boltSenderName),
-	)
+	}
+
+	if !testMode {
+		options = append(options, dbus.WithMatchSender(boltSenderName))
+	}
+
+	return conn.AddMatchSignal(options...)
 }
 
 func run() error {
@@ -198,6 +206,11 @@ func run() error {
 }
 
 func main() {
+	if len(os.Args) > 2 && os.Args[1] == "-t" {
+		testMode = true
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+	}
+
 	if err := run(); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
