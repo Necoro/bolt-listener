@@ -30,7 +30,7 @@ func (c *cmd) exec() error {
 
 type dock struct {
 	uuid       string
-	authorize  *cmd
+	authorized *cmd
 	disconnect *cmd
 	name       string
 }
@@ -55,7 +55,7 @@ func (d *dock) handle(script *cmd, descr string) error {
 func (d *dock) handleStatus(status string) error {
 	switch status {
 	case "authorized":
-		return d.handle(d.authorize, "authorize")
+		return d.handle(d.authorized, "authorize")
 	case "disconnected":
 		return d.handle(d.disconnect, "disconnect")
 	default:
@@ -97,7 +97,7 @@ func run() error {
 
 		docks[d.objectPath()] = dock{
 			uuid:       d.Uuid,
-			authorize:  d.Authorize,
+			authorized: d.Authorized,
 			disconnect: d.Disconnect,
 			name:       name,
 		}

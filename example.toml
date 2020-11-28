@@ -8,14 +8,14 @@ bus = "session"
 uuid = "deadbeef_abc"
 
 # executables for authorization and disconnect
-authorize.cmd = "some_script.sh"
+authorized.cmd = "some_script.sh"
 disconnect.cmd = "some_other_script.sh"
 
 [docks.bar]
 uuid = "123456"
 
 # arguments are also possible
-authorize.cmd = "./test.sh"
-authorize.args = ["foo", "1"]
+authorized.cmd = "./test.sh"
+authorized.args = ["foo", "1"]
 
 # disconnect is omitted here: nothing is done

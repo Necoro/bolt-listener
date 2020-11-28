@@ -12,7 +12,7 @@ const configFileName = "bolt-listener.toml"
 
 type dockConfig struct {
 	Uuid       string
-	Authorize  *cmd
+	Authorized *cmd
 	Disconnect *cmd
 }
 
