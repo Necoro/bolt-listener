@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,23 +80,23 @@ func (d *dock) handleStatus(status string) error {
 	}
 }
 
-func loadConfig() (*config, error) {
-	configfile, err := xdg.ConfigFile(configFileName)
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
+func loadConfig(configfile string) (cfg *config, err error) {
+	if configfile == "" {
+		if configfile, err = xdg.ConfigFile(configFileName); err != nil {
+			return nil, fmt.Errorf("loading config: %w", err)
+		}
 	}
 
-	config := config{}
 	tree, err := toml.LoadFile(configfile)
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	if err = tree.Unmarshal(&config); err != nil {
+	cfg = new(config)
+	if err = tree.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
-
-	return &config, nil
+	return
 }
 
 func dbusConnect(busName string) (*dbus.Conn, error) {
@@ -115,12 +116,16 @@ func addSignal(conn *dbus.Conn, path dbus.ObjectPath) error {
 }
 
 func run() error {
-	config, err := loadConfig()
+	cfgOverride := flag.String("f", "", "configuration file")
+	debug := flag.Bool("d", false, "enable debug output")
+	flag.Parse()
+
+	config, err := loadConfig(*cfgOverride)
 	if err != nil {
 		return err
 	}
 
-	if config.Debug {
+	if config.Debug || *debug {
 		log.SetDebug()
 	} else {
 		log.SetVerbose()
