@@ -168,6 +168,10 @@ func run() error {
 
 	docks := make(docks)
 	for name, d := range config.Docks {
+		if d.Uuid == "" {
+			return fmt.Errorf("UUID is mandatory, but missing for %s.", name)
+		}
+
 		docks[d.objectPath()] = dock{
 			uuid:       d.Uuid,
 			authorize:  d.Authorize,
