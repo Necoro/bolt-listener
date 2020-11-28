@@ -1,0 +1,21 @@
+debug = false
+
+# the bus to use: system or session
+bus = "session"
+
+[docks.foo]
+# uuid as returned by `boltclt --list`
+uuid = "deadbeef_abc"
+
+# executables for authorization and disconnect
+authorize.cmd = "some_script.sh"
+disconnect.cmd = "some_other_script.sh"
+
+[docks.bar]
+uuid = "123456"
+
+# arguments are also possible
+authorize.cmd = "./test.sh"
+authorize.args = ["foo", "1"]
+
+# disconnect is omitted here: nothing is done
