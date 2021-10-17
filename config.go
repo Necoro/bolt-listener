@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/Necoro/feed2imap-go/pkg/log"
+	"github.com/Necoro/bolt-listener/pkg/log"
 	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml"
 )
